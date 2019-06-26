@@ -20,9 +20,9 @@ namespace handy {
 
 struct PollerEpoll : public PollerBase{
     int fd_;
-    std::set<Channel*> liveChannels_;
+    std::set<Channel*> liveChannels_; // 所有监听Channel的指针的集合
     //for epoll selected active events
-    struct epoll_event activeEvs_[kMaxEvents];
+    struct epoll_event activeEvs_[kMaxEvents];//epoll_wait返回的就绪事件集合，事件的data.ptr保存对应的Channel的指针
     PollerEpoll();
     ~PollerEpoll();
     void addChannel(Channel* ch) override;
@@ -48,15 +48,16 @@ PollerEpoll::~PollerEpoll() {
     info("poller %d destroyed", fd_);
 }
 
+//将Channel本身加入到Poller中，底层就是调用epoll_ctl
 void PollerEpoll::addChannel(Channel* ch) {
     struct epoll_event ev;
     memset(&ev, 0, sizeof(ev));
     ev.events = ch->events();
-    ev.data.ptr = ch;
+    ev.data.ptr = ch; // 保存Channel的指针到epoll_event.data.ptr中备用
     trace("adding channel %lld fd %d events %d epoll %d", (long long)ch->id(), ch->fd(), ev.events, fd_);
     int r = epoll_ctl(fd_, EPOLL_CTL_ADD, ch->fd(), &ev);
     fatalif(r, "epoll_ctl add failed %d %s", errno, strerror(errno));
-    liveChannels_.insert(ch);
+    liveChannels_.insert(ch); // 将Channel的指针保存到Poller的 liveChannels_集合中
 }
 
 void PollerEpoll::updateChannel(Channel* ch) {
@@ -83,14 +84,20 @@ void PollerEpoll::removeChannel(Channel* ch) {
 
 void PollerEpoll::loop_once(int waitMs) {
     int64_t ticks = util::timeMilli();
+
+    // 1. epoll_wait 轮询发生的事件，通常阻塞在这里,超时事件waitMs
     lastActive_ = epoll_wait(fd_, activeEvs_, kMaxEvents, waitMs);
     int64_t used = util::timeMilli()-ticks;
     trace("epoll wait %d return %d errno %d used %lld millsecond",
           waitMs, lastActive_, errno, (long long)used);
     fatalif(lastActive_ == -1 && errno != EINTR, "epoll return error %d %s", errno, strerror(errno));
+
+     // 2. 循环处理每个事件
     while (--lastActive_ >= 0) {
         int i = lastActive_;
+        // 2.1 注册事件时，已经将Channel的指针传递给了data.ptr，现在发生事件后直接拿来使用
         Channel* ch = (Channel*)activeEvs_[i].data.ptr;
+        // 2.2 根据事件的类型，调用设置好的回调函数处理
         int events = activeEvs_[i].events;
         if (ch) {
             if (events & (kReadEvent | POLLERR)) {

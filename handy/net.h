@@ -17,6 +17,7 @@ struct net {
     static int setNoDelay(int fd, bool value=true);
 };
 
+//ip+端口号获取的常用操作
 struct Ip4Addr {
     Ip4Addr(const std::string& host, short port);
     Ip4Addr(short port=0): Ip4Addr("", port) {}
@@ -52,14 +53,14 @@ struct Buffer {
     Buffer& append(const char* p) { return append(p, strlen(p)); }
     template<class T> Buffer& appendValue(const T& v) { append((const char*)&v, sizeof v); return *this; }
     Buffer& consume(size_t len) { b_ += len; if (size() == 0) clear(); return *this; }
-    Buffer& absorb(Buffer& buf);
+    Buffer& absorb(Buffer& buf); //吸收buf,即把传进来的buf的数据添加到buffer中
     void setSuggestSize(size_t sz) { exp_ = sz; }
     Buffer(const Buffer& b) { copyFrom(b); }
     Buffer& operator=(const Buffer& b) { if(this == &b) return *this; delete[] buf_; buf_ = NULL; copyFrom(b); return *this; }
     operator Slice () { return Slice(data(), size()); }
 private:
     char* buf_;
-    size_t b_, e_, cap_, exp_;
+    size_t b_, e_, cap_, exp_;//begin,end,capacity
     void moveHead() { std::copy(begin(), end(), buf_); e_ -= b_; b_ = 0; }
     void expand(size_t len);
     void copyFrom(const Buffer& b);

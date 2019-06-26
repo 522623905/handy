@@ -58,6 +58,7 @@ Ip4Addr::Ip4Addr(const string& host, short port) {
     }
 }
 
+//返回ip+端口号
 string Ip4Addr::toString() const {
     uint32_t uip = addr_.sin_addr.s_addr;
     return util::format("%d.%d.%d.%d:%d",
@@ -68,6 +69,7 @@ string Ip4Addr::toString() const {
         ntohs(addr_.sin_port));
 }
 
+//返回ip
 string Ip4Addr::ip() const { 
     uint32_t uip = addr_.sin_addr.s_addr;
     return util::format("%d.%d.%d.%d",
@@ -77,6 +79,7 @@ string Ip4Addr::ip() const {
         (uip >> 24)&0xff);
 }
 
+//返回端口号
 short Ip4Addr::port() const {
     return ntohs(addr_.sin_port);
 }
@@ -89,6 +92,9 @@ bool Ip4Addr::isIpValid() const {
 }
 
 char* Buffer::makeRoom(size_t len) {
+    // 1.剩余容量足够容纳len长度的数据,不用前移或分配
+    // 2.如果e_+len>cap,且可读字节数+len<cap/2,不需分配新空间,只需数据前移
+    // 3.否则扩容
     if (e_ + len <= cap_) {
     } else if (size() + len < cap_ / 2) {
         moveHead();
@@ -112,11 +118,13 @@ void Buffer::expand(size_t len) {
 void Buffer::copyFrom(const Buffer& b) {
     memcpy(this, &b, sizeof b); 
     if (b.buf_) {
+        //深拷贝?
         buf_ = new char[cap_]; 
         memcpy(data(), b.begin(), b.size());
     }
 }
 
+//吸收buf,即把传进来的buf的数据添加到buffer中
 Buffer& Buffer::absorb(Buffer& buf) { 
     if (&buf != this) {
         if (size() == 0) {

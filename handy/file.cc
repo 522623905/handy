@@ -28,6 +28,9 @@ Status file::getContent(const std::string& filename, std::string& cont){
 }
 
 Status file::writeContent(const std::string& filename, const std::string& cont) {
+    //O_TRUNC :若文件存在，则长度被截为0，属性不变
+    //S_IWUSR: 允许文件所有者写它
+    //S_IRUSR: 允许文件的所有者阅读它
     int fd = open(filename.c_str(), O_WRONLY|O_CREAT|O_TRUNC, S_IRUSR | S_IWUSR);
     if (fd < 0) {
         return Status::ioError("open", filename);
@@ -49,6 +52,7 @@ Status file::renameSave(const string& name, const string& tmpName, const string&
     return s;
 }
 
+//读取当前目录dir下包含的文件名
 Status file::getChildren(const std::string& dir, std::vector<std::string>* result) {
     result->clear();
     DIR* d = opendir(dir.c_str());

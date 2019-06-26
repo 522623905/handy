@@ -60,6 +60,7 @@ inline Status::Status(int code, const char* msg) {
     memcpy(p+8, msg, sz-8);
 }
 
+//自定义code(如errno)的信息
 inline Status Status::fromFormat(int code, const char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);

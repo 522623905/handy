@@ -12,6 +12,7 @@ namespace handy {
 
 namespace {
 
+//可重复闹铃的定时器
 struct TimerRepeatable {
     int64_t at; //current timer timeout timestamp
     int64_t interval;
@@ -19,9 +20,10 @@ struct TimerRepeatable {
     Task cb;
 };
 
+//空闲的节点
 struct IdleNode {
-    TcpConnPtr con_;
-    int64_t updated_;
+    TcpConnPtr con_; //连接
+    int64_t updated_; //连接的最后活动时间
     TcpCallBack cb_;
 };
 
@@ -37,23 +39,26 @@ struct IdleIdImp {
 
 struct EventsImp {
     EventBase* base_;
-    PollerBase* poller_;
+    PollerBase* poller_;// Reactor中的Poller，底层是如epoll、kqueue...
     std::atomic<bool> exit_;
-    int wakeupFds_[2];
+    int wakeupFds_[2];//管道,用于唤醒IO线程
     int nextTimeout_;
-    SafeQueue<Task> tasks_;
+    SafeQueue<Task> tasks_;//任务队列
     
+    //定时器相关
     std::map<TimerId, TimerRepeatable> timerReps_;
     std::map<TimerId, Task> timers_;
     std::atomic<int64_t> timerSeq_;
-    // 记录每个idle时间（单位秒）下所有的连接。链表中的所有连接，最新的插入到链表末尾。连接若有活动，会把连接从链表中移到链表尾部，做法参考memcache
+    // 记录每个idle时间（单位秒）下所有的连接。
+    // 链表中的所有连接，最新的插入到链表末尾。
+    // 连接若有活动，会把连接从链表中移到链表尾部，做法参考memcache
     std::map<int, std::list<IdleNode>> idleConns_;
     std::set<TcpConnPtr> reconnectConns_;
     bool idleEnabled;
 
     EventsImp(EventBase* base, int taskCap);
     ~EventsImp();
-    void init();
+    void init(); //管道wakeupFds_的初始化
     void callIdles();
     IdleId registerIdle(int idle, const TcpConnPtr& con, const TcpCallBack& cb);
     void unregisterIdle(const IdleId& id);
@@ -77,6 +82,7 @@ struct EventsImp {
     TimerId runAt(int64_t milli, Task&& task, int64_t interval);
 };
 
+//taskCapacity指定任务队列的大小，0无限制
 EventBase::EventBase(int taskCapacity) {
     imp_.reset(new EventsImp(this, taskCapacity));
     imp_->init();
@@ -103,6 +109,7 @@ TimerId EventBase::runAt(int64_t milli, Task&& task, int64_t interval) {
 }
 
 EventsImp::EventsImp(EventBase* base, int taskCap):
+    //在编译过程的预处理阶段，会根据平台确定使用哪种poller
     base_(base), poller_(createPoller()), exit_(false), nextTimeout_(1<<30), tasks_(taskCap),
     timerSeq_(0), idleEnabled(false)
 {
@@ -120,7 +127,9 @@ void EventsImp::loop() {
     loop_once(0);
 }
 
+//完成管道的初始化工作
 void EventsImp::init() {
+    // 1. 创建管道，然后向poller注册它的可读事件，用于唤醒IO线程
     int r = pipe(wakeupFds_);
     fatalif(r, "pipe failed %d %s", errno, strerror(errno));
     r = util::addFdFlag(wakeupFds_[0], FD_CLOEXEC);
@@ -128,12 +137,17 @@ void EventsImp::init() {
     r = util::addFdFlag(wakeupFds_[1], FD_CLOEXEC);
     fatalif(r, "addFdFlag failed %d %s", errno, strerror(errno));
     trace("wakeup pipe created %d %d", wakeupFds_[0], wakeupFds_[1]);
+
+    // 2. 创建Channel，并注册wakeupFds_[0]的可读事件
     Channel* ch = new Channel(base_, wakeupFds_[0], kReadEvent);
+
+    // 3. 设置wakeupFds_[0]可读事件的回调函数，使用lambda
     ch->onRead([=] {
         char buf[1024];
         int r = ch->fd() >= 0 ? ::read(ch->fd(), buf, sizeof buf) : 0;
         if (r > 0) {
             Task task;
+            //从任务队列中取出任务,并执行
             while (tasks_.pop_wait(&task, 0)) {
                 task();
             }
@@ -172,9 +186,9 @@ void EventsImp::callIdles() {
             if (node.updated_ + idle > now) {
                 break;
             }
-            node.updated_ = now;
-            lst.splice(lst.end(), lst, lst.begin());
-            node.cb_(node.con_);
+            node.updated_ = now; //更新活动的时间
+            lst.splice(lst.end(), lst, lst.begin());//把lst.begin对应的连接移到链表尾部
+            node.cb_(node.con_); //调用该连接的回调
         }
     }
 }
@@ -273,8 +287,11 @@ void MultiBase::loop() {
 
 Channel::Channel(EventBase* base, int fd, int events): base_(base), fd_(fd), events_(events) {
     fatalif(net::setNonBlock(fd_) < 0, "channel set non block failed");
+    // 每个Channel有一个独特的id
     static atomic<int64_t> id(0);
     id_ = ++id;
+
+    // 指向poller的指针，使用poller的addChannel将自己加入到poller中
     poller_ = base_->imp_->poller_;
     poller_->addChannel(this);
 }
@@ -318,10 +335,10 @@ void Channel::enableReadWrite(bool readable, bool writable) {
 void Channel::close() {
     if (fd_>=0) {
         trace("close channel %ld fd %d", (long)id_, fd_);
-        poller_->removeChannel(this);
-        ::close(fd_);
+        poller_->removeChannel(this); // 从poller中移除该channel
+        ::close(fd_); // 关闭该fd
         fd_ = -1;
-        handleRead();
+        handleRead(); // 调用read callback
     }
 }
 

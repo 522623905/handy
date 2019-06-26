@@ -56,10 +56,12 @@ struct MultiBase: public EventBases{
     MultiBase& exit() { for (auto& b: bases_) { b.exit(); } return *this; }
 private:
     std::atomic<int> id_;
-    std::vector<EventBase> bases_;
+    std::vector<EventBase> bases_;//多个Reactor
 };
 
 //通道，封装了可以进行epoll的一个fd
+//每个Channel只负责一个文件描述符fd的IO事件分发，在析构时关闭该fd。
+//Channel会把不同的IO事件分发给不同的回调函数，如ReadCallback、WriteCallback
 struct Channel: private noncopyable {
     //base为事件管理器，fd为通道内部的fd，events为通道关心的事件
     Channel(EventBase* base, int fd, int events);

@@ -23,6 +23,7 @@ ThreadPool::~ThreadPool() {
     }
 }
 
+//启动线程池
 void ThreadPool::start() {
     for (auto& th: threads_) {
         thread t(

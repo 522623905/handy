@@ -15,9 +15,10 @@ const int kMaxEvents = 2000;
 const int kReadEvent = POLLIN;
 const int kWriteEvent = POLLOUT;
 
+//PollerBase是一个纯虚类，定义了一些接口
 struct PollerBase: private noncopyable {
     int64_t id_;
-    int lastActive_;
+    int lastActive_; //就绪的事件个数
     PollerBase(): lastActive_(-1) { static std::atomic<int64_t> id(0); id_ = ++id; }
     virtual void addChannel(Channel* ch) = 0;
     virtual void removeChannel(Channel* ch) = 0;

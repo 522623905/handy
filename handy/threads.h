@@ -11,8 +11,9 @@
 
 namespace handy {
 
+//任务队列
 template<typename T> struct SafeQueue: private std::mutex, private noncopyable {
-    static const int wait_infinite = std::numeric_limits<int>::max();
+    static const int wait_infinite = std::numeric_limits<int>::max(); //得到int极值
     //0 不限制队列中的任务数
     SafeQueue(size_t capacity=0): capacity_(capacity), exit_(false) {}
     //队列满则返回false
@@ -27,14 +28,14 @@ template<typename T> struct SafeQueue: private std::mutex, private noncopyable {
     bool exited() { return exit_; }
 private: 
     std::list<T> items_;
-    std::condition_variable ready_;
+    std::condition_variable ready_;//要求和std::unique_lock<std::mutex>配合使用
     size_t capacity_;
     std::atomic<bool> exit_;
     void wait_ready(std::unique_lock<std::mutex>& lk, int waitMs);
 };
 
 typedef std::function<void()> Task;
-extern template class SafeQueue<Task>;
+extern template class SafeQueue<Task>;//外部模板,告诉编译器不要在此转换单元中实例化模板,作用是减少编译时间
 
 struct ThreadPool: private noncopyable {
     //创建线程池
@@ -74,15 +75,18 @@ template<typename T> bool SafeQueue<T>::push(T&& v) {
     ready_.notify_one();
     return true;
 }
+
+//超时等待队列非空
 template<typename T> void SafeQueue<T>::wait_ready(
     std::unique_lock<std::mutex>& lk, int waitMs)
 {
+    //exit或队列非空,则可直接返回
     if (exit_ || !items_.empty()) {
         return;
     }
-    if (waitMs == wait_infinite) {
+    if (waitMs == wait_infinite) { //无限等待
         ready_.wait(lk, [this]{ return exit_ || !items_.empty(); });
-    } else if (waitMs > 0){
+    } else if (waitMs > 0){ //超时等待
         auto tp = std::chrono::steady_clock::now()
             + std::chrono::milliseconds(waitMs);
         while (ready_.wait_until(lk, tp) != std::cv_status::timeout 

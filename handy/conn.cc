@@ -11,6 +11,9 @@ namespace handy {
 void handyUnregisterIdle(EventBase* base, const IdleId& idle);
 void handyUpdateIdle(EventBase* base, const IdleId& idle);
 
+//TcpConn被创建后，调用的第一个函数就是attach
+//创建一个关于已连接套接字的Channel，并设置好读写回调函数。
+//可以说TcpConn也是Channel和EventBase的使用者
 void TcpConn::attach(EventBase* base, int fd, Ip4Addr local, Ip4Addr peer)
 {
     fatalif((destPort_<=0 && state_ != State::Invalid) || (destPort_>=0 && state_ != State::Handshaking),
@@ -20,16 +23,23 @@ void TcpConn::attach(EventBase* base, int fd, Ip4Addr local, Ip4Addr peer)
     local_ = local;
     peer_ = peer;
     delete channel_;
+
+    // 创建一个Channel，向Poller注册已连接套接字的可读和可写事件
     channel_ = new Channel(base, fd, kWriteEvent|kReadEvent);
     trace("tcp constructed %s - %s fd: %d",
         local_.toString().c_str(),
         peer_.toString().c_str(),
         fd);
+
+    // 获得自己的shared_ptr
     TcpConnPtr con = shared_from_this();
+
+    // 设置读写回调函数
     con->channel_->onRead([=] { con->handleRead(con); });
     con->channel_->onWrite([=] { con->handleWrite(con); });
 }
 
+// 连接到host+port的服务器
 void TcpConn::connect(EventBase* base, const string& host, short port, int timeout, const string& localip) {
     fatalif(state_ != State::Invalid && state_ != State::Closed && state_ != State::Failed,
             "current state is bad state to connect. state: %d", state_);
@@ -51,6 +61,7 @@ void TcpConn::connect(EventBase* base, const string& host, short port, int timeo
         error("bind to %s failed error %d %s", addr.toString().c_str(), errno, strerror(errno));
     }
     if (r == 0) {
+        // 连接服务端
         r = ::connect(fd, (sockaddr *) &addr.getAddr(), sizeof(sockaddr_in));
         if (r != 0 && errno != EINPROGRESS) {
             error("connect to %s error %d %s", addr.toString().c_str(), errno, strerror(errno));
@@ -60,13 +71,13 @@ void TcpConn::connect(EventBase* base, const string& host, short port, int timeo
     sockaddr_in local;
     socklen_t alen = sizeof(local);
     if (r == 0) {
-        r = getsockname(fd, (sockaddr *) &local, &alen);
+        r = getsockname(fd, (sockaddr *) &local, &alen); //获取本端sockaddr
         if (r < 0) {
             error("getsockname failed %d %s", errno, strerror(errno));
         }
     }
-    state_ = State::Handshaking;
-    attach(base, fd, Ip4Addr(local), addr);
+    state_ = State::Handshaking; //改变状态为Handshaking
+    attach(base, fd, Ip4Addr(local), addr);//创建一个关于已连接套接字的Channel，并设置好读写回调函数
     if (timeout) {
         TcpConnPtr con = shared_from_this();
         timeoutId_ = base->runAfter(timeout, [con] {
@@ -125,8 +136,10 @@ void TcpConn::handleRead(const TcpConnPtr& con) {
             trace("channel %lld fd %d readed %d bytes", (long long)channel_->id(), channel_->fd(), rd);
         }
         if (rd == -1 && errno == EINTR) {
+            //如果是中断，则重新read
             continue;
         } else if (rd == -1 && (errno == EAGAIN || errno == EWOULDBLOCK) ) {
+            //如果没有数据来，则更新下空闲连接
             for(auto& idle: idleIds_) {
                 handyUpdateIdle(getBase(), idle);
             }
@@ -278,8 +291,10 @@ createcb_([]{ return TcpConnPtr(new TcpConn); })
 {
 }
 
+// 服务器的套路：socket、bind、listen...
 int TcpServer::bind(const std::string &host, short port, bool reusePort) {
     addr_ = Ip4Addr(host, port);
+    // 1. socket
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     int r = net::setReuseAddr(fd);
     fatalif(r, "set socket reuse option failed");
@@ -287,34 +302,38 @@ int TcpServer::bind(const std::string &host, short port, bool reusePort) {
     fatalif(r, "set socket reuse port option failed");
     r = util::addFdFlag(fd, FD_CLOEXEC);
     fatalif(r, "addFdFlag FD_CLOEXEC failed");
+    // 2. bind
     r = ::bind(fd,(struct sockaddr *)&addr_.getAddr(),sizeof(struct sockaddr));
     if (r) {
         close(fd);
         error("bind to %s failed %d %s", addr_.toString().c_str(), errno, strerror(errno));
         return errno;
     }
+    // 3. listen
     r = listen(fd, 20);
     fatalif(r, "listen failed %d %s", errno, strerror(errno));
     info("fd %d listening at %s", fd, addr_.toString().c_str());
+    // 4. 创建channel，监听套接字可读（即有新连接到来时）时调用handleAccept
     listen_channel_ = new Channel(base_, fd, kReadEvent);
     listen_channel_->onRead([this]{ handleAccept(); });
     return 0;
 }
 
 TcpServerPtr TcpServer::startServer(EventBases* bases, const std::string& host, short port, bool reusePort) {
-    TcpServerPtr p(new TcpServer(bases));
-    int r = p->bind(host, port, reusePort);
+    TcpServerPtr p(new TcpServer(bases)); // 创建TcpServer
+    int r = p->bind(host, port, reusePort); // 服务器的套路：socket、bind、listen...
     if (r) {
         error("bind to %s:%d failed %d %s", host.c_str(), port, errno, strerror(errno));
     }
     return r == 0 ? p : NULL;
 }
 
+//对每个连接创建一个TcpConn来处理
 void TcpServer::handleAccept() {
     struct sockaddr_in raddr;
     socklen_t rsz = sizeof(raddr);
     int lfd = listen_channel_->fd();
-    int cfd;
+    int cfd; //client socket fd
     while (lfd >= 0 && (cfd = accept(lfd,(struct sockaddr *)&raddr,&rsz))>=0) {
         sockaddr_in peer, local;
         socklen_t alen = sizeof(peer);
@@ -343,10 +362,10 @@ void TcpServer::handleAccept() {
             if (msgcb_) {
                 con->onMsg(codec_->clone(), msgcb_);
             }
-        };
-        if (b == base_) {
+        };        
+        if (b == base_) { // 是同一个EventBase，说明在同一个线程，就直接调用它
             addcon();
-        } else {
+        } else { // 否则，将该lambda移动到b所属的线程执行
             b->safeCall(move(addcon));
         }
     }

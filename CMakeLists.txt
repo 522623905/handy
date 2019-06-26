@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.9)
-add_definitions(-DOS_MACOSX)
+cmake_minimum_required(VERSION 3.5.1)
+add_definitions(-DOS_LINUX)
 project(echo)
 
 include_directories("${PROJECT_SOURCE_DIR}")
@@ -81,3 +81,10 @@ add_executable(kqueue
         raw-examples/kqueue.cc)
 target_link_libraries(kqueue handy)
 
+add_executable(epoll
+        raw-examples/epoll.cc)
+target_link_libraries(epoll handy)
+
+add_executable(epoll-et
+        raw-examples/epoll-et.cc)
+target_link_libraries(epoll-et handy)

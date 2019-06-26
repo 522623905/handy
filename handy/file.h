@@ -5,6 +5,7 @@
 
 namespace handy {
 
+//基础的文件操作
 struct file {
     static Status getContent(const std::string& filename, std::string& cont);
     static Status writeContent(const std::string& filename, const std::string& cont);

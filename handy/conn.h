@@ -5,7 +5,7 @@ namespace handy {
 
 //Tcp连接，使用引用计数
     struct TcpConn: public std::enable_shared_from_this<TcpConn>, private noncopyable {
-        //Tcp连接的个状态
+        //Tcp连接的个状态,使用状态机描述一个连接的生命期
         enum State { Invalid=1, Handshaking, Connected, Closed, Failed, };
         //Tcp构造函数，实际可用的连接应当通过createConnection创建
         TcpConn();
@@ -66,13 +66,13 @@ namespace handy {
         std::string str() { return peer_.toString(); }
 
     public:
-        EventBase* base_;
-        Channel* channel_;
-        Buffer input_, output_;
-        Ip4Addr local_, peer_;
-        State state_;
-        TcpCallBack readcb_, writablecb_, statecb_;
-        std::list<IdleId> idleIds_;
+        EventBase* base_; // 事件循环
+        Channel* channel_; // 已连接套接字对应的Channel
+        Buffer input_, output_; // 输入/输出缓冲区
+        Ip4Addr local_, peer_; //本地/对端 ip地址
+        State state_; // 状态
+        TcpCallBack readcb_, writablecb_, statecb_; // 一些回调函数
+        std::list<IdleId> idleIds_; //管理空闲连接
         TimerId timeoutId_;
         AutoContext ctx_, internalCtx_;
         std::string destHost_, localIp_;
@@ -83,9 +83,9 @@ namespace handy {
         void handleWrite(const TcpConnPtr& con);
         ssize_t isend(const char* buf, size_t len);
         void cleanup(const TcpConnPtr& con);
-        void connect(EventBase* base, const std::string& host, short port, int timeout, const std::string& localip);
+        void connect(EventBase* base, const std::string& host, short port, int timeout, const std::string& localip);// 连接host+port的服务器
         void reconnect();
-        void attach(EventBase* base, int fd, Ip4Addr local, Ip4Addr peer);
+        void attach(EventBase* base, int fd, Ip4Addr local, Ip4Addr peer);//创建一个关于已连接套接字的Channel，并设置好读写回调函数
         virtual int readImp(int fd, void* buf, size_t bytes) { return ::read(fd, buf, bytes); }
         virtual int writeImp(int fd, const void* buf, size_t bytes) { return ::write(fd, buf, bytes); }
         virtual int handleHandshake(const TcpConnPtr& con);
@@ -108,8 +108,8 @@ namespace handy {
     private:
         EventBase* base_;
         EventBases* bases_;
-        Ip4Addr addr_;
-        Channel* listen_channel_;
+        Ip4Addr addr_; // 服务器地址
+        Channel* listen_channel_; // 监听channel，对应socket中的监听套接字
         TcpCallBack statecb_, readcb_;
         MsgCallBack msgcb_;
         std::function<TcpConnPtr()> createcb_;
